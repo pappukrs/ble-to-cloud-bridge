@@ -1,0 +1,3 @@
+# dbus-python and PyGObject come from the OS (apt: python3-dbus python3-gi).
+# Create the venv with --system-site-packages so they are visible.
+pytest>=8

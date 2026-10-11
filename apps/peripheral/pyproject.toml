@@ -1,0 +1,9 @@
+[project]
+name = "ble-chat-peripheral"
+version = "0.1.0"
+description = "Linux BLE peripheral for the Bluetooth-only chat (BlueZ over D-Bus)"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
