@@ -9,6 +9,11 @@ function initialPage(): Page {
   return window.location.hash === '#dashboard' ? 'dashboard' : 'bridge';
 }
 
+/**
+ * Both pages stay mounted and only the inactive one is hidden.
+ * Unmounting the bridge would drop its relay socket while the BLE link
+ * stays open, so readings would silently stop flowing.
+ */
 export function App() {
   const [page, setPage] = useState<Page>(initialPage);
   const go = (p: Page) => {
@@ -28,11 +33,12 @@ export function App() {
           </button>
         </nav>
       </header>
-      {page === 'bridge' ? (
+      <div hidden={page !== 'bridge'}>
         <BridgePage wsUrl={WS_URL} wsToken={WS_TOKEN} />
-      ) : (
+      </div>
+      <div hidden={page !== 'dashboard'}>
         <DashboardPage wsUrl={WS_URL} wsToken={WS_TOKEN} />
-      )}
+      </div>
       <footer className="muted">Relay: {WS_URL}</footer>
     </main>
   );
