@@ -1,46 +1,70 @@
 import { useEffect, useRef, useState } from 'react';
+import { newParticipantId, type ChatEnvelope } from '@ble-bridge/shared';
 import { isBluetoothAvailable } from '../ble/client';
 import { connectChat, type ChatLink } from '../ble/chat';
-
-export interface ChatMessage {
-  from: 'me' | 'peer';
-  text: string;
-  ts: number;
-}
 
 export interface ChatPageProps {
   /** Injected for tests. */
   bluetooth?: Bluetooth;
   now?: () => number;
+  storage?: Pick<Storage, 'getItem' | 'setItem'>;
+}
+
+const NAME_KEY = 'ble-chat.name';
+const ID_KEY = 'ble-chat.id';
+
+function safeStorage(): Pick<Storage, 'getItem' | 'setItem'> {
+  try {
+    return window.localStorage;
+  } catch {
+    const mem = new Map<string, string>();
+    return { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => void mem.set(k, v) };
+  }
 }
 
 /**
- * Bluetooth-only chat. Runs on the phone as the central; the laptop runs
- * apps/peripheral. No network is used at any point.
+ * Bluetooth-only group chat. Runs on the phone as a central; the laptop runs
+ * apps/peripheral as the hub. No network is used at any point.
  */
-export function ChatPage({ bluetooth, now = Date.now }: ChatPageProps) {
+export function ChatPage({ bluetooth, now = Date.now, storage }: ChatPageProps) {
+  const store = useRef(storage ?? safeStorage()).current;
+  const [id] = useState(() => {
+    const existing = store.getItem(ID_KEY);
+    if (existing) return existing;
+    const fresh = newParticipantId();
+    store.setItem(ID_KEY, fresh);
+    return fresh;
+  });
+  const [name, setName] = useState(() => store.getItem(NAME_KEY) ?? '');
   const [link, setLink] = useState<ChatLink | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatEnvelope[]>([]);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const logRef = useRef<HTMLUListElement>(null);
 
   const available = bluetooth ? true : isBluetoothAvailable();
+  const nameOk = name.trim().length > 0;
 
   useEffect(() => {
     logRef.current?.lastElementChild?.scrollIntoView?.({ block: 'end' });
   }, [messages]);
 
-  const push = (from: ChatMessage['from'], text: string) =>
-    setMessages((prev) => [...prev, { from, text, ts: now() }]);
+  useEffect(() => {
+    store.setItem(NAME_KEY, name);
+  }, [name, store]);
+
+  const push = (envelope: ChatEnvelope) => setMessages((prev) => [...prev, envelope]);
 
   const onConnect = async () => {
     setError(null);
     try {
       const chat = await connectChat({
+        id,
+        name: name.trim(),
+        now,
         ...(bluetooth ? { bluetooth } : {}),
-        onMessage: (text) => push('peer', text),
+        onMessage: push,
         onDisconnect: () => setLink(null),
       });
       setLink(chat);
@@ -55,8 +79,7 @@ export function ChatPage({ bluetooth, now = Date.now }: ChatPageProps) {
     setDraft('');
     setSending(true);
     try {
-      await link.send(text);
-      push('me', text);
+      push(await link.send(text));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -67,9 +90,17 @@ export function ChatPage({ bluetooth, now = Date.now }: ChatPageProps) {
   return (
     <section>
       <h2>Chat</h2>
-      <p className="muted">Phone to laptop over Bluetooth only. No network involved.</p>
+      <p className="muted">Everyone connects to one laptop over Bluetooth. No network involved.</p>
 
       <div className="row">
+        <input
+          aria-label="your name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Your name"
+          maxLength={24}
+          disabled={link !== null}
+        />
         {link ? (
           <>
             <span>
@@ -78,7 +109,7 @@ export function ChatPage({ bluetooth, now = Date.now }: ChatPageProps) {
             <button onClick={() => link.disconnect()}>Disconnect</button>
           </>
         ) : (
-          <button onClick={onConnect} disabled={!available}>
+          <button onClick={onConnect} disabled={!available || !nameOk}>
             Connect to laptop
           </button>
         )}
@@ -92,7 +123,11 @@ export function ChatPage({ bluetooth, now = Date.now }: ChatPageProps) {
 
       <ul className="chat" aria-label="chat messages" ref={logRef}>
         {messages.map((m, i) => (
-          <li key={`${m.ts}-${i}`} className={`bubble bubble-${m.from}`}>
+          <li
+            key={`${m.id}-${m.ts}-${i}`}
+            className={`bubble bubble-${m.id === id ? 'me' : 'peer'}`}
+          >
+            {m.id !== id ? <span className="who">{m.from}</span> : null}
             <span>{m.text}</span>
             <time dateTime={new Date(m.ts).toISOString()}>
               {new Date(m.ts).toLocaleTimeString()}

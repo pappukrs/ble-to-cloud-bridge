@@ -87,3 +87,58 @@ export class ChunkReassembler {
     return decoder.decode(joined);
   }
 }
+
+/**
+ * Chat envelope. The text that travels inside the chunked transport is JSON:
+ *   {"id":"<sender id>","from":"<display name>","text":"<message>","ts":<ms>}
+ * The laptop hub forwards every envelope to all subscribed phones, including the
+ * sender, so each phone drops envelopes whose id matches its own.
+ */
+export interface ChatEnvelope {
+  id: string;
+  from: string;
+  text: string;
+  ts: number;
+}
+
+export const MAX_NAME_LENGTH = 24;
+export const MAX_TEXT_LENGTH = 2000;
+
+export function encodeEnvelope(envelope: ChatEnvelope): string {
+  return JSON.stringify({
+    id: envelope.id,
+    from: envelope.from.slice(0, MAX_NAME_LENGTH),
+    text: envelope.text.slice(0, MAX_TEXT_LENGTH),
+    ts: envelope.ts,
+  });
+}
+
+/** Returns null for anything that is not a well-formed envelope. */
+export function decodeEnvelope(raw: string): ChatEnvelope | null {
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof json !== 'object' || json === null) return null;
+  const o = json as Record<string, unknown>;
+  if (typeof o.id !== 'string' || !o.id) return null;
+  if (typeof o.from !== 'string' || !o.from) return null;
+  if (typeof o.text !== 'string') return null;
+  if (typeof o.ts !== 'number' || !Number.isFinite(o.ts)) return null;
+  return {
+    id: o.id,
+    from: o.from.slice(0, MAX_NAME_LENGTH),
+    text: o.text.slice(0, MAX_TEXT_LENGTH),
+    ts: o.ts,
+  };
+}
+
+/** Short random id for a chat participant, stable for one app install. */
+export function newParticipantId(random: () => number = Math.random): string {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let id = '';
+  for (let i = 0; i < 8; i++) id += alphabet[Math.floor(random() * alphabet.length)];
+  return id;
+}

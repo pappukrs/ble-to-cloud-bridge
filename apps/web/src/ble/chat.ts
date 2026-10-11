@@ -4,39 +4,48 @@ import {
   CHAT_SERVICE_UUID,
   ChunkReassembler,
   DEFAULT_MTU,
+  decodeEnvelope,
   encodeChunks,
+  encodeEnvelope,
   payloadSizeForMtu,
+  type ChatEnvelope,
 } from '@ble-bridge/shared';
 import { BleUnavailableError } from './client';
 
 export interface ChatLink {
   peerName: string | undefined;
-  /** Chunk, write, and return how many chunks were sent. */
-  send(message: string): Promise<number>;
+  /** Wrap in an envelope, chunk, write. Resolves with the envelope that was sent. */
+  send(text: string): Promise<ChatEnvelope>;
   disconnect(): void;
 }
 
 export interface ChatLinkOptions {
+  /** This participant's stable id and display name. */
+  id: string;
+  name: string;
   /** Injected for tests. Defaults to the real navigator.bluetooth. */
   bluetooth?: Bluetooth;
-  onMessage: (text: string) => void;
+  /** Called for every envelope from someone else. Own echoes are filtered out. */
+  onMessage: (envelope: ChatEnvelope) => void;
   onDisconnect?: () => void;
   /**
    * Web Bluetooth does not expose the negotiated MTU, so the sender picks a
    * conservative chunk size. 20 bytes is always safe; Android usually allows ~500.
    */
   mtu?: number;
+  now?: () => number;
 }
 
 /**
- * Phone side of the Bluetooth-only chat. The phone is the central: it finds the
- * laptop by service UUID, writes outgoing text into `inbox` in chunks, and
- * subscribes to `outbox` for incoming chunks.
+ * Phone side of the Bluetooth-only chat. The phone is a central: it finds the
+ * laptop hub by service UUID, writes outgoing envelopes into `inbox` in chunks,
+ * and subscribes to `outbox` for envelopes the hub forwards from everyone.
  */
 export async function connectChat(options: ChatLinkOptions): Promise<ChatLink> {
   const bluetooth = options.bluetooth ?? (navigator as Navigator).bluetooth;
   if (!bluetooth) throw new BleUnavailableError();
   const payloadSize = payloadSizeForMtu(options.mtu ?? DEFAULT_MTU);
+  const now = options.now ?? Date.now;
 
   const device = await bluetooth.requestDevice({ filters: [{ services: [CHAT_SERVICE_UUID] }] });
   if (!device.gatt) throw new Error('Device has no GATT server');
@@ -51,7 +60,9 @@ export async function connectChat(options: ChatLinkOptions): Promise<ChatLink> {
     const view = (event.target as BluetoothRemoteGATTCharacteristic).value;
     if (!view) return;
     const text = reassembler.feed(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
-    if (text !== null) options.onMessage(text);
+    if (text === null) return;
+    const envelope = decodeEnvelope(text);
+    if (envelope && envelope.id !== options.id) options.onMessage(envelope);
   });
 
   device.addEventListener('gattserverdisconnected', () => options.onDisconnect?.());
@@ -61,11 +72,12 @@ export async function connectChat(options: ChatLinkOptions): Promise<ChatLink> {
 
   return {
     peerName: device.name,
-    send: (message) => {
-      const chunks = encodeChunks(message, payloadSize);
+    send: (text) => {
+      const envelope: ChatEnvelope = { id: options.id, from: options.name, text, ts: now() };
+      const chunks = encodeChunks(encodeEnvelope(envelope), payloadSize);
       const run = queue.then(async () => {
         for (const chunk of chunks) await inbox.writeValueWithResponse(chunk.slice().buffer);
-        return chunks.length;
+        return envelope;
       });
       queue = run.catch(() => undefined);
       return run;

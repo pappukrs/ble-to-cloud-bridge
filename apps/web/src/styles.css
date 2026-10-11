@@ -165,3 +165,8 @@ footer {
   align-self: flex-start;
   background: var(--border);
 }
+.who {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent);
+}
