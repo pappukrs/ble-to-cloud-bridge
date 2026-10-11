@@ -1,8 +1,39 @@
+import { useState } from 'react';
+import { BridgePage } from './pages/BridgePage';
+import { DashboardPage } from './pages/DashboardPage';
+import { WS_URL, WS_TOKEN } from './config';
+
+type Page = 'bridge' | 'dashboard';
+
+function initialPage(): Page {
+  return window.location.hash === '#dashboard' ? 'dashboard' : 'bridge';
+}
+
 export function App() {
+  const [page, setPage] = useState<Page>(initialPage);
+  const go = (p: Page) => {
+    window.location.hash = p;
+    setPage(p);
+  };
   return (
     <main>
-      <h1>BLE to Cloud Bridge</h1>
-      <p>Scaffold. Features arrive phase by phase.</p>
+      <header>
+        <h1>BLE to Cloud Bridge</h1>
+        <nav>
+          <button aria-pressed={page === 'bridge'} onClick={() => go('bridge')}>
+            Bridge
+          </button>
+          <button aria-pressed={page === 'dashboard'} onClick={() => go('dashboard')}>
+            Dashboard
+          </button>
+        </nav>
+      </header>
+      {page === 'bridge' ? (
+        <BridgePage wsUrl={WS_URL} wsToken={WS_TOKEN} />
+      ) : (
+        <DashboardPage wsUrl={WS_URL} wsToken={WS_TOKEN} />
+      )}
+      <footer className="muted">Relay: {WS_URL}</footer>
     </main>
   );
 }
