@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { BridgePage } from './pages/BridgePage';
 import { DashboardPage } from './pages/DashboardPage';
+import { ChatPage } from './pages/ChatPage';
 import { WS_URL, WS_TOKEN } from './config';
 
-type Page = 'bridge' | 'dashboard';
+type Page = 'bridge' | 'dashboard' | 'chat';
 
 function initialPage(): Page {
-  return window.location.hash === '#dashboard' ? 'dashboard' : 'bridge';
+  const hash = window.location.hash.replace('#', '');
+  return hash === 'dashboard' || hash === 'chat' ? hash : 'bridge';
 }
 
 /**
@@ -31,6 +33,9 @@ export function App() {
           <button aria-pressed={page === 'dashboard'} onClick={() => go('dashboard')}>
             Dashboard
           </button>
+          <button aria-pressed={page === 'chat'} onClick={() => go('chat')}>
+            Chat
+          </button>
         </nav>
       </header>
       <div hidden={page !== 'bridge'}>
@@ -38,6 +43,9 @@ export function App() {
       </div>
       <div hidden={page !== 'dashboard'}>
         <DashboardPage wsUrl={WS_URL} wsToken={WS_TOKEN} />
+      </div>
+      <div hidden={page !== 'chat'}>
+        <ChatPage />
       </div>
       <footer className="muted">Relay: {WS_URL}</footer>
     </main>

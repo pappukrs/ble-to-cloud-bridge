@@ -11,6 +11,7 @@ export class FakeCharacteristic extends EventTarget {
   writeValue = vi.fn(async (data: BufferSource) => {
     this.value = new DataView(data instanceof ArrayBuffer ? data : data.buffer.slice(0));
   });
+  writeValueWithResponse = vi.fn(async (data: BufferSource) => this.writeValue(data));
   startNotifications = vi.fn(async () => this);
 
   setText(text: string): void {
