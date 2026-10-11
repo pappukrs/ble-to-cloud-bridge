@@ -1,57 +1,62 @@
-# Bluetooth-only chat: setup and offline install
+# Bluetooth-only group chat: setup and offline install
 
-Phone (central, Chrome for Android) <-- BLE --> Laptop (peripheral, Python + BlueZ).
-No WiFi, no mobile data, no server. The only non-Bluetooth step is loading the
-page onto the phone once, because Web Bluetooth requires a secure context.
-
-## 1. Laptop: start the peripheral
-
-```bash
-cd apps/peripheral/src
-../.venv/bin/python -m ble_chat.main
+```
+[Phone A] --BLE--\
+[Phone B] --BLE----> [Laptop hub: Python + BlueZ] --forwards every message to every phone
+[Phone C] --BLE--/   (the laptop user can chat too, from the terminal)
 ```
 
-You should see `Advertising as 'ble-chat'`. Leave this terminal open; it is the laptop's chat window.
+No WiFi, no mobile data, no server. The only non-Bluetooth step is loading the page
+onto each phone once, because Web Bluetooth requires a secure context.
 
-## 2. Laptop: start the web app
+## 1. Laptop: start the hub
 
 ```bash
-npm run dev:web
+cd apps/peripheral
+python3 -m venv --system-site-packages .venv && .venv/bin/pip install -r requirements.txt   # first time only
+cd src && ../.venv/bin/python -m ble_chat.main --name "Adheesh's laptop"
 ```
 
-## 3. Phone: load the page once over USB (no network)
+Wait for `Advertising as 'ble-chat'`. This terminal is the laptop's chat window: type a line, press Enter.
 
-1. On the phone enable Developer options and USB debugging, plug in the cable, accept the prompt.
-2. On the laptop:
-   ```bash
-   adb devices            # phone must show as "device", not "unauthorized"
-   adb reverse tcp:5173 tcp:5173
-   ```
-   This makes the phone's `localhost:5173` reach the laptop's dev server through the cable.
-3. On the phone open Chrome and go to `http://localhost:5173/#chat`.
-   `localhost` counts as secure, so Web Bluetooth is available.
+## 2. Phones: install the app once
 
-## 4. Phone: install as an app
+**Option A, hosted (easiest):** open the GitHub Pages URL in Chrome for Android:
 
-Chrome menu -> **Add to Home screen** (or **Install app**). The service worker has
-already cached everything, so from now on the app launches from the home screen
-with no cable and no network.
+    https://pappukrs.github.io/ble-to-cloud-bridge/#chat
 
-## 5. Chat
+Then Chrome menu -> **Add to Home screen** / **Install app**. Done. Internet is needed
+only for this one visit; the service worker caches everything.
 
-1. Unplug the cable. Turn off WiFi and mobile data to prove the point.
-2. Open the installed app, tap **Connect to laptop**, pick `ble-chat`.
-3. Type on the phone; it appears in the laptop terminal. Type in the terminal; it appears on the phone.
+**Option B, no internet at all:** USB cable.
+
+```bash
+npm run dev:web                       # on the laptop
+adb devices                           # phone must show "device", not "unauthorized"
+adb reverse tcp:5173 tcp:5173
+```
+
+On the phone open `http://localhost:5173/#chat`, then Add to Home screen. Unplug.
+
+## 3. Chat
+
+1. Turn off WiFi and mobile data on the phones to prove the point. Keep Bluetooth on.
+2. Open the installed app, type your name, tap **Connect to laptop**, pick `ble-chat`.
+3. Every phone and the laptop terminal see every message, with the sender's name.
+
+Repeat step 2 on as many phones as you like. Linux typically allows 5 to 8 simultaneous connections.
+
+## How it works
+
+- Each phone is a BLE **central**, the laptop is the **peripheral** (a role flip from the cloud bridge feature).
+- A message is a JSON envelope `{id, from, text, ts}`. The `id` is a random 8-char string the app makes once and keeps.
+- The envelope is UTF-8 and split into chunks of MTU-4 bytes with a 1-byte header (sequence + last flag). See `packages/shared/src/chat.ts` and `apps/peripheral/src/ble_chat/chunk.py`.
+- The hub reassembles, prints, and re-chunks the same envelope to the `outbox` characteristic. BlueZ delivers that notification to every subscribed phone. Each phone drops envelopes whose `id` is its own.
 
 ## Troubleshooting
 
 - `adb devices` shows `unauthorized`: unlock the phone and accept the USB debugging prompt.
-- Chooser shows no `ble-chat`: the peripheral terminal must say "Advertising". Restart it.
-- "No Services matching UUID": BlueZ on the phone side cached an old table. Toggle Bluetooth off and on on the phone.
-- Laptop prints "nobody subscribed yet": the phone has not connected or tapped Connect.
-- Only the first 19 bytes of each chunk arrive: expected with the default MTU. Long messages are chunked and reassembled; see `packages/shared/src/chat.ts`.
-
-## Production build
-
-`npm run build -w @ble-bridge/web` writes `apps/web/dist` with `sw.js` and `manifest.webmanifest`.
-Serve `dist/` from any static server on the laptop and use the same `adb reverse` trick with its port.
+- Chooser shows no `ble-chat`: the hub terminal must say "Advertising". Restart it. Some adapters stop advertising while a phone is connected; if a second phone cannot find the laptop, that is why. Intel adapters on recent kernels keep advertising.
+- "No Services matching UUID": the phone cached an old table. Toggle Bluetooth off and on on the phone.
+- Hub prints "nobody is connected yet": no phone has tapped Connect.
+- `RegisterApplication failed`: run `journalctl -u bluetooth -n 20` for the daemon's reason.
