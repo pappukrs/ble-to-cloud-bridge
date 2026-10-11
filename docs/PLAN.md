@@ -181,3 +181,56 @@ Stretch: replace with a Docker image + ECR, or go serverless (API Gateway WebSoc
 - `https://app.<domain>` loads, "Connect" pairs with nRF Connect, a second device's dashboard updates live.
 - README has architecture diagram, demo GIF, setup steps, and the measured BLE vs WiFi table.
 - Repo topics set: `bluetooth-low-energy`, `web-bluetooth`, `websocket`, `aws`, `react`, `typescript`, `nodejs`, `iot`, `vitest`, `github-actions`.
+
+---
+
+## 9. Feature 2: Bluetooth-only chat (offline PWA)
+
+Decided 2026-10-12. No internet, no relay. Two devices, one BLE link, all chat bytes over the radio.
+
+```
+[Phone: Chrome for Android, installed PWA]        [Laptop: Linux]
+  React chat page                                   Python BLE peripheral (BlueZ over D-Bus)
+  Web Bluetooth = central        <---- BLE ---->    advertises "chat" service, terminal chat UI
+```
+
+Roles flip compared to Feature 1: the laptop is now the peripheral, the phone is the central.
+nRF Connect is no longer needed.
+
+### GATT layout
+
+| Characteristic | UUID | Properties | Direction |
+|---|---|---|---|
+| inbox  | `0000c0de-0000-1000-8000-00805f9b34fb` ... see `packages/shared/src/chat.ts` | write | phone -> laptop |
+| outbox | | notify | laptop -> phone |
+
+### Wire format (chunking)
+
+A BLE write/notify carries at most MTU-3 bytes (20 by default, up to ~500 after negotiation).
+Messages are UTF-8, split into chunks with a 1-byte header:
+
+```
+bit 7      : last chunk flag
+bits 0..6  : sequence number (wraps at 128)
+bytes 1..n : payload
+```
+
+Receiver appends payloads in sequence order and emits the message on the last flag.
+Same encoder/decoder in TypeScript (`packages/shared`) and Python (`apps/peripheral`), tested on both sides with the same vectors.
+
+### Offline after install
+
+- The web app is a PWA: manifest + service worker that precaches the build.
+- First load must be a secure context. Use `adb reverse tcp:5173 tcp:5173` over USB so the phone opens `http://localhost:5173`.
+- Then "Add to Home screen". From then on it launches with no network.
+
+### Phases
+
+| Phase | Deliverable | Tests |
+|---|---|---|
+| C1 | `apps/peripheral` Python: chunk codec + BlueZ GATT server + advertising + stdin chat | pytest on codec |
+| C2 | `packages/shared/src/chat.ts`: TS chunk codec, same vectors | vitest round-trip, out-of-order, wrap |
+| C3 | Web: `/#chat` page, connect to laptop, send/receive with chunking | fake Bluetooth tests |
+| C4 | PWA: manifest, service worker, install flow doc, `adb reverse` steps | build check in CI |
+| C5 | Manual test with WiFi and mobile data off; measure latency and throughput into learning notes | checklist |
+| C6 | README section + demo GIF | |
